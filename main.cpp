@@ -201,7 +201,7 @@ uint64_t find_conflict_threshold(void *alloc_start, size_t allocated_pages, size
   while(i < areas.size() && !areas[i].high_activity) {
     i++;
   }
-  while(i < areas.size() && areas[i].high_activity) {
+  while(i < areas.size() && (areas[i].high_activity || areas[i].end - areas[i].start < N_BUCKETS / 10)) {
     i++;
   }
 
@@ -232,7 +232,7 @@ void test_threshold(int n, char *alloc_start, int alloc_size, uint64_t threshold
   DRAMAddr fixed(alloc_start);
   DRAMAddr row_conflict_test_addr = fixed;
   uint64_t max_rows = DRAMConfig::get().rows();
-  for(int i = 0; i < max_rows; i += (max_rows - fixed.actual_row()) / n) {
+  for(int i = 0; i < n; i++) {
     row_conflict_test_addr.add_inplace(0, (max_rows - fixed.actual_row()) / n, 0);
     printf("testing address %s against %s. This should result in a row conflict.\n", row_conflict_test_addr.to_string().c_str(), fixed.to_string().c_str());
     if(row_conflict_test_addr.to_virt() > alloc_start + alloc_size) {
@@ -241,9 +241,39 @@ void test_threshold(int n, char *alloc_start, int alloc_size, uint64_t threshold
     }
     uint64_t time = measure_timing((volatile char *)fixed.to_virt(), (volatile char *)row_conflict_test_addr.to_virt());
     if(time > threshold_cycles) {
-      printf("address %s seems to be in another row as it exceeds the row threshold (%lu) by %lu (timing: %lu)\n", row_conflict_test_addr.to_string().c_str(), threshold_cycles, time - threshold_cycles, time);
+      printf("[OK] address %s seems to be in another row as it exceeds the row threshold (%lu) by %lu (timing: %lu)\n", 
+             row_conflict_test_addr.to_string().c_str(), 
+             threshold_cycles, 
+             time - threshold_cycles, 
+             time);
     } else {
-      printf("address mapping seems to be wrong for address %s as it is %lu below the threshold (defined as %lu). Timing was %lu.\n", row_conflict_test_addr.to_string().c_str(), threshold_cycles - time, threshold_cycles, time);
+      printf("[ERR] address mapping seems to be wrong for address %s as it is %lu below the threshold (defined as %lu). Timing was %lu.\n", 
+             row_conflict_test_addr.to_string().c_str(), 
+             threshold_cycles - time, 
+             threshold_cycles, 
+             time);
+    }
+
+    for(int j = 0; j < n; j++) {
+      DRAMAddr col_fixed = row_conflict_test_addr;
+      DRAMAddr col_conflict_test_addr = row_conflict_test_addr.add(0, 0, DRAMConfig::get().columns() / n);
+      printf("testing for same-row access between %s and %s. This should result in no conflict being detected.\n", 
+             col_fixed.to_string().c_str(), 
+             col_conflict_test_addr.to_string().c_str());
+      time = measure_timing((volatile char *)col_fixed.to_virt(), (volatile char *)col_conflict_test_addr.to_virt());
+      if(time > threshold_cycles) {
+        if(time <= threshold_cycles) {
+          printf("[OK] address %s seems to be in the same row as it does not the row threshold (timing: %lu)\n", 
+                 col_conflict_test_addr.to_string().c_str(), 
+                 time);
+        } else {
+          printf("[ERR] address mapping seems to be wrong for address %s as it is %lu below the threshold (defined as %lu). Timing was %lu.\n", 
+                 col_conflict_test_addr.to_string().c_str(), 
+                 threshold_cycles - time, 
+                 threshold_cycles, 
+                 time);
+        }
+      }
     }
   }
 }
