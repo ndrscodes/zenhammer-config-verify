@@ -298,10 +298,10 @@ void test_bank_threshold(int n, char *alloc_start, int alloc_size, uint64_t thre
   DRAMAddr fixed(alloc_start);
   int increment = n > max_banks ? 1 : max_banks / n;
   printf("bank increment set to %d\n", increment);
-
-  for(int i = 0; i < n; i += increment) {
+  int max = n > max_banks ? max_banks : n;
+  for(int i = 0; i < max; i += increment) {
     DRAMAddr bank_conflict_test_addr = fixed;
-    for(int j = i + 1; j < n; j += increment) {
+    for(int j = i + 1; j < max; j += increment) {
       bank_conflict_test_addr.add_inplace(increment, 0, 0);
       printf("testing address %s against %s. This should result in fast timing.\n", bank_conflict_test_addr.to_string().c_str(), fixed.to_string().c_str());
       if(bank_conflict_test_addr.to_virt() > alloc_start + alloc_size) {
