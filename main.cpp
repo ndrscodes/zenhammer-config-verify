@@ -334,7 +334,7 @@ int main (int argc, char *argv[]) {
   
   uint64_t threshold = find_conflict_threshold(alloc_start, N_PAGES, 8192);
   printf("determined threshold to be %lu cycles.\n", threshold);
-  test_threshold(50, (char *)alloc_start, N_PAGES * PAGE_SIZE, threshold);
+  test_bank_threshold(50, (char *)alloc_start, N_PAGES * PAGE_SIZE, threshold);
 
   printf("done.\n");
   return 0;
