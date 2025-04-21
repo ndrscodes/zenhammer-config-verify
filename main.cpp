@@ -228,7 +228,18 @@ uint64_t find_conflict_threshold(void *alloc_start, size_t allocated_pages, size
   return threshold;
 }
 
-void test_col_threshold(DRAMAddr row_base, int n, char *alloc_start, int alloc_size, uint64_t threshold_cycles) {
+enum threshold_failure_t {
+  ABOVE, BELOW
+};
+
+typedef struct {
+  void *addr1;
+  void *addr2;
+  uint64_t timing;
+  threshold_failure_t type;
+} failure;
+
+void test_col_threshold(DRAMAddr row_base, int n, char *alloc_start, int alloc_size, uint64_t threshold_cycles, std::vector<failure> *failures) {
   DRAMAddr col_fixed = row_base;
   DRAMAddr col_conflict_test_addr = row_base;
   for(int j = 0; j < n; j++) {
@@ -253,11 +264,12 @@ void test_col_threshold(DRAMAddr row_base, int n, char *alloc_start, int alloc_s
              threshold_cycles - time, 
              threshold_cycles, 
              time);
+      failures->push_back({ col_fixed.to_virt(), col_conflict_test_addr.to_virt(), time, time < threshold_cycles ? threshold_failure_t::BELOW : threshold_failure_t::ABOVE });
     }
   }
 }
 
-void test_row_threshold(DRAMAddr bank_base, int n, char *alloc_start, int alloc_size, uint64_t threshold_cycles) {
+void test_row_threshold(DRAMAddr bank_base, int n, char *alloc_start, int alloc_size, uint64_t threshold_cycles, std::vector<failure> *failures) {
   uint64_t max_rows = DRAMConfig::get().rows();
   uint64_t banks = DRAMConfig::get().banks();
   DRAMAddr fixed = bank_base;
@@ -284,6 +296,7 @@ void test_row_threshold(DRAMAddr bank_base, int n, char *alloc_start, int alloc_
                threshold_cycles - time, 
                threshold_cycles, 
                time);
+        failures->push_back({ fixed.to_virt(), row_conflict_test_addr.to_virt(), time, time < threshold_cycles ? threshold_failure_t::BELOW : threshold_failure_t::ABOVE });
       }
     }
 
@@ -320,6 +333,7 @@ void test_row_threshold(DRAMAddr bank_base, int n, char *alloc_start, int alloc_
                threshold_cycles, 
                time - threshold_cycles, 
                time);
+        failures->push_back({ fixed.to_virt(), row_conflict_test_addr.to_virt(), time, time < threshold_cycles ? threshold_failure_t::BELOW : threshold_failure_t::ABOVE });
       } else {
         printf("[OK][INTER_BANK] address mapping for %s seems to be ok, expected timing below threshold (defined as %lu) due to parallel bank access. Timing was %lu.\n", 
                row_conflict_test_addr.to_string().c_str(), 
@@ -327,7 +341,7 @@ void test_row_threshold(DRAMAddr bank_base, int n, char *alloc_start, int alloc_
                time);
       }
     }
-    test_col_threshold(row_conflict_test_addr, n, alloc_start, alloc_size, threshold_cycles);
+    test_col_threshold(row_conflict_test_addr, n, alloc_start, alloc_size, threshold_cycles, failures);
     fixed.add_inplace(0, (max_rows / n), 0);
     if(fixed.to_virt() > alloc_start + alloc_size) {
       break;
@@ -341,6 +355,7 @@ void test_bank_threshold(int n, char *alloc_start, int alloc_size, uint64_t thre
   int increment = n > max_banks ? 1 : max_banks / n;
   printf("bank increment set to %d\n", increment);
   int max = n > max_banks ? max_banks : n;
+  std::vector<failure> failed_addr;
   for(int i = 0; i < max; i += increment) {
     DRAMAddr bank_conflict_test_addr = fixed;
     for(int j = i + 1; j < max; j += increment) {
@@ -362,15 +377,26 @@ void test_bank_threshold(int n, char *alloc_start, int alloc_size, uint64_t thre
                time - threshold_cycles, 
                threshold_cycles, 
                time);
+        failed_addr.push_back({ fixed.to_virt(), bank_conflict_test_addr.to_virt(), time, time < threshold_cycles ? threshold_failure_t::BELOW : threshold_failure_t::ABOVE });
         break;
       }
     }
-    test_row_threshold(fixed, n, alloc_start, alloc_size, threshold_cycles);
+    test_row_threshold(fixed, n, alloc_start, alloc_size, threshold_cycles, &failed_addr);
     fixed.add_inplace(increment, 0, 0);
     printf("increased bank by %d.\n", increment);
     if(fixed.to_virt() > alloc_start + alloc_size) {
       break;
     }
+  }
+
+  FILE *err_file = fopen("failed.csv", "w+");
+  if(err_file == NULL) {
+    printf("unable to open failed.csv.\n");
+    return;
+  }
+
+  for(auto f : failed_addr) {
+    fprintf(err_file, "%p;%p;%lu;%s\n", f.addr1, f.addr2, f.timing, f.type == ABOVE ? "ABOVE" : "BELOW");
   }
 }
 
@@ -382,7 +408,7 @@ int main (int argc, char *argv[]) {
   
   uint64_t threshold = find_conflict_threshold(alloc_start, N_PAGES, 8192);
   printf("determined threshold to be %lu cycles.\n", threshold);
-  test_bank_threshold(150, (char *)alloc_start, N_PAGES * PAGE_SIZE, threshold);
+  test_bank_threshold(750, (char *)alloc_start, N_PAGES * PAGE_SIZE, threshold);
 
   printf("done.\n");
   return 0;
