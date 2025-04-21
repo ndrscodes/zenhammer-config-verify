@@ -263,6 +263,7 @@ void test_row_threshold(DRAMAddr bank_base, int n, char *alloc_start, int alloc_
   for(int i = 0; i < n; i++) {
     DRAMAddr row_conflict_test_addr = fixed;
     for(int j = i + 1; j < n; j++) {
+      printf("fixed row test %d/%d (%d, %d)\n", i * j, n * n, i, j);
       row_conflict_test_addr.add_inplace(0, (max_rows - fixed.actual_row()) / n, 0);
       printf("testing address %s against %s. This should result in a row conflict.\n", row_conflict_test_addr.to_string().c_str(), fixed.to_string().c_str());
       if(row_conflict_test_addr.to_virt() > alloc_start + alloc_size) {
