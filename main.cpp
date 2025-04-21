@@ -259,6 +259,7 @@ void test_col_threshold(DRAMAddr row_base, int n, char *alloc_start, int alloc_s
 
 void test_row_threshold(DRAMAddr bank_base, int n, char *alloc_start, int alloc_size, uint64_t threshold_cycles) {
   uint64_t max_rows = DRAMConfig::get().rows();
+  uint64_t banks = DRAMConfig::get().banks();
   DRAMAddr fixed = bank_base;
   for(int i = 0; i < n; i++) {
     DRAMAddr row_conflict_test_addr = fixed;
@@ -284,8 +285,48 @@ void test_row_threshold(DRAMAddr bank_base, int n, char *alloc_start, int alloc_
                threshold_cycles, 
                time);
       }
-      test_col_threshold(row_conflict_test_addr, n, alloc_start, alloc_size, threshold_cycles);
     }
+
+    row_conflict_test_addr = fixed.add(0, 1, 0);
+    if(row_conflict_test_addr.to_virt() > alloc_start + alloc_size) {
+      printf("skipping bank conflict test for %s because it would exceed the allocated area.\n", row_conflict_test_addr.to_string().c_str());
+      break;
+    }
+    uint64_t time = measure_timing((volatile char *)fixed.to_virt(), (volatile char *)row_conflict_test_addr.to_virt());
+    if(time > threshold_cycles) {
+      printf("[OK] address %s seems to be in the same bank as it exceeds the row threshold (%lu) by %lu (timing: %lu)\n", 
+             row_conflict_test_addr.to_string().c_str(), 
+             threshold_cycles, 
+             time - threshold_cycles, 
+             time);
+    } else {
+      printf("[ERR] address mapping for %s seems to be wrong, expected timing above threshold (defined as %lu). Timing was %lu.\n", 
+             row_conflict_test_addr.to_string().c_str(), 
+             threshold_cycles, 
+             time);
+    }
+
+    for(int j = 0; j < banks; j++) {
+      DRAMAddr other_bank_addr = fixed.add(j, 1, 0);
+      if(other_bank_addr.to_virt() > alloc_start + alloc_size) {
+        printf("skipping bank conflict test for %s because it would exceed the allocated area.\n", other_bank_addr.to_string().c_str());
+        break;
+      }
+      uint64_t time = measure_timing((volatile char *)fixed.to_virt(), (volatile char *)other_bank_addr.to_virt());
+      if(time > threshold_cycles) {
+        printf("[ERR] address %s seems to be in the same bank as it exceeds the row threshold (%lu) by %lu (timing: %lu)\n", 
+               row_conflict_test_addr.to_string().c_str(), 
+               threshold_cycles, 
+               time - threshold_cycles, 
+               time);
+      } else {
+        printf("[OK] address mapping for %s seems to be ok, expected timing below threshold (defined as %lu) due to parallel bank access. Timing was %lu.\n", 
+               row_conflict_test_addr.to_string().c_str(), 
+               threshold_cycles, 
+               time);
+      }
+    }
+    test_col_threshold(row_conflict_test_addr, n, alloc_start, alloc_size, threshold_cycles);
     fixed.add_inplace(0, (max_rows / n), 0);
     if(fixed.to_virt() > alloc_start + alloc_size) {
       break;
@@ -340,7 +381,7 @@ int main (int argc, char *argv[]) {
   
   uint64_t threshold = find_conflict_threshold(alloc_start, N_PAGES, 8192);
   printf("determined threshold to be %lu cycles.\n", threshold);
-  test_bank_threshold(50, (char *)alloc_start, N_PAGES * PAGE_SIZE, threshold);
+  test_bank_threshold(150, (char *)alloc_start, N_PAGES * PAGE_SIZE, threshold);
 
   printf("done.\n");
   return 0;
