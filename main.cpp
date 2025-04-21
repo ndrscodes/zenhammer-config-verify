@@ -56,6 +56,7 @@ void* allocate(size_t n_pages) {
     exit(EXIT_FAILURE);
   }
   memset(res, 0x42, n_pages * PAGE_SIZE);
+  printf("allocated %lu bytes of memory.\n", n_pages * PAGE_SIZE);
   return res;
 }
 
@@ -84,7 +85,7 @@ void* random_page_addr(void *start_addr, size_t alloc_size, size_t step_size) {
 
   size_t random = distr(gen) * step_size;
 
-  return start_addr + random;
+  return ((char *)start_addr) + random;
 }
 
 uint64_t measure_timing(volatile char *addr1, volatile char *addr2) {
