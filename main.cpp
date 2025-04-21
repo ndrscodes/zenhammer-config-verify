@@ -254,7 +254,7 @@ int main (int argc, char *argv[]) {
   DRAMConfig::select_config(Microarchitecture::AMD_ZEN_3, 1, 4, 4, false);
   DRAMAddr::initialize_mapping(0, (volatile char *)alloc_start);
   
-  uint64_t threshold = find_conflict_threshold(alloc_start, N_PAGES, PAGE_SIZE);
+  uint64_t threshold = find_conflict_threshold(alloc_start, N_PAGES, 8192);
   printf("determined threshold to be %lu cycles.\n", threshold);
   test_threshold(50, (char *)alloc_start, N_PAGES * PAGE_SIZE, threshold);
 
