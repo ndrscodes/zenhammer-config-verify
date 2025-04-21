@@ -295,10 +295,12 @@ void test_row_threshold(DRAMAddr bank_base, int n, char *alloc_start, int alloc_
 void test_bank_threshold(int n, char *alloc_start, int alloc_size, uint64_t threshold_cycles) {
   uint64_t max_banks = DRAMConfig::get().banks();
   DRAMAddr fixed(alloc_start);
-  for(int i = 0; i < n; i++) {
+  int increment = n > max_banks ? 1 : max_banks / n;
+
+  for(int i = 0; i < n; i += increment) {
     DRAMAddr bank_conflict_test_addr = fixed;
-    for(int j = i + 1; j < n; j++) {
-      bank_conflict_test_addr.add_inplace(max_banks / n, 0, 0);
+    for(int j = i + 1; j < n; j += increment) {
+      bank_conflict_test_addr.add_inplace(increment, 0, 0);
       printf("testing address %s against %s. This should result in a row conflict.\n", bank_conflict_test_addr.to_string().c_str(), fixed.to_string().c_str());
       if(bank_conflict_test_addr.to_virt() > alloc_start + alloc_size) {
         printf("stopping because test address exceeds the allocated space (%p)\n", alloc_start + alloc_size);
@@ -319,7 +321,7 @@ void test_bank_threshold(int n, char *alloc_start, int alloc_size, uint64_t thre
       }
       test_row_threshold(bank_conflict_test_addr, n, alloc_start, alloc_size, threshold_cycles);
     }
-    fixed.add_inplace(0, (max_banks / n), 0);
+    fixed.add_inplace(increment, 0, 0);
     if(fixed.to_virt() > alloc_start + alloc_size) {
       break;
     }
