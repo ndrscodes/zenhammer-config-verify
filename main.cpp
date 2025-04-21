@@ -244,11 +244,11 @@ void test_col_threshold(DRAMAddr row_base, int n, char *alloc_start, int alloc_s
 
     uint64_t time = measure_timing((volatile char *)col_fixed.to_virt(), (volatile char *)col_conflict_test_addr.to_virt());
     if(time <= threshold_cycles) {
-      printf("[OK] address %s seems to be in the same row as it does not the row threshold (timing: %lu)\n", 
+      printf("[OK][COL] address %s seems to be in the same row as it does not the row threshold (timing: %lu)\n", 
              col_conflict_test_addr.to_string().c_str(), 
              time);
     } else {
-      printf("[ERR] address mapping seems to be wrong for address %s as it is %lu below the threshold (defined as %lu). Timing was %lu.\n", 
+      printf("[ERR][COL] address mapping seems to be wrong for address %s as it is %lu below the threshold (defined as %lu). Timing was %lu.\n", 
              col_conflict_test_addr.to_string().c_str(), 
              threshold_cycles - time, 
              threshold_cycles, 
@@ -273,13 +273,13 @@ void test_row_threshold(DRAMAddr bank_base, int n, char *alloc_start, int alloc_
       }
       uint64_t time = measure_timing((volatile char *)fixed.to_virt(), (volatile char *)row_conflict_test_addr.to_virt());
       if(time > threshold_cycles) {
-        printf("[OK] address %s seems to be in another row as it exceeds the row threshold (%lu) by %lu (timing: %lu)\n", 
+        printf("[OK][ROW] address %s seems to be in another row as it exceeds the row threshold (%lu) by %lu (timing: %lu)\n", 
                row_conflict_test_addr.to_string().c_str(), 
                threshold_cycles, 
                time - threshold_cycles, 
                time);
       } else {
-        printf("[ERR] address mapping seems to be wrong for address %s as it is %lu below the threshold (defined as %lu). Timing was %lu.\n", 
+        printf("[ERR][ROW] address mapping seems to be wrong for address %s as it is %lu below the threshold (defined as %lu). Timing was %lu.\n", 
                row_conflict_test_addr.to_string().c_str(), 
                threshold_cycles - time, 
                threshold_cycles, 
@@ -293,20 +293,21 @@ void test_row_threshold(DRAMAddr bank_base, int n, char *alloc_start, int alloc_
       break;
     }
     uint64_t time = measure_timing((volatile char *)fixed.to_virt(), (volatile char *)row_conflict_test_addr.to_virt());
+    printf("running close-row check (%s and %s)...\n", fixed.to_string().c_str(), row_conflict_test_addr.to_string().c_str());
     if(time > threshold_cycles) {
-      printf("[OK] address %s seems to be in the same bank as it exceeds the row threshold (%lu) by %lu (timing: %lu)\n", 
+      printf("[OK][CLOSE_ROW] address %s seems to be in the same bank as it exceeds the row threshold (%lu) by %lu (timing: %lu)\n", 
              row_conflict_test_addr.to_string().c_str(), 
              threshold_cycles, 
              time - threshold_cycles, 
              time);
     } else {
-      printf("[ERR] address mapping for %s seems to be wrong, expected timing above threshold (defined as %lu). Timing was %lu.\n", 
+      printf("[ERR][CLOSE_ROW] address mapping for %s seems to be wrong, expected timing above threshold (defined as %lu). Timing was %lu.\n", 
              row_conflict_test_addr.to_string().c_str(), 
              threshold_cycles, 
              time);
     }
 
-    for(int j = 0; j < banks; j++) {
+    for(int j = 1; j < banks; j++) {
       DRAMAddr other_bank_addr = fixed.add(j, 1, 0);
       if(other_bank_addr.to_virt() > alloc_start + alloc_size) {
         printf("skipping bank conflict test for %s because it would exceed the allocated area.\n", other_bank_addr.to_string().c_str());
@@ -314,13 +315,13 @@ void test_row_threshold(DRAMAddr bank_base, int n, char *alloc_start, int alloc_
       }
       uint64_t time = measure_timing((volatile char *)fixed.to_virt(), (volatile char *)other_bank_addr.to_virt());
       if(time > threshold_cycles) {
-        printf("[ERR] address %s seems to be in the same bank as it exceeds the row threshold (%lu) by %lu (timing: %lu)\n", 
+        printf("[ERR][INTER_BANK] address %s seems to be in the same bank as it exceeds the row threshold (%lu) by %lu (timing: %lu)\n", 
                row_conflict_test_addr.to_string().c_str(), 
                threshold_cycles, 
                time - threshold_cycles, 
                time);
       } else {
-        printf("[OK] address mapping for %s seems to be ok, expected timing below threshold (defined as %lu) due to parallel bank access. Timing was %lu.\n", 
+        printf("[OK][INTER_BANK] address mapping for %s seems to be ok, expected timing below threshold (defined as %lu) due to parallel bank access. Timing was %lu.\n", 
                row_conflict_test_addr.to_string().c_str(), 
                threshold_cycles, 
                time);
