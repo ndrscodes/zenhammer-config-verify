@@ -278,7 +278,7 @@ typedef struct {
 typedef struct {
   DRAMAddr *fixed_addr;
   int steps;
-  increment increment;
+  increment inc;
   threshold_failure_t measure_fail_type;
   failure_type scope;
   char *alloc_start;
@@ -304,7 +304,7 @@ const char* failure_type_str(failure_type type) {
 
 uint64_t run_test(measure_session_conf config) {
   uint64_t n_failed = 0;
-  increment inc = config.increment;
+  increment inc = config.inc;
   DRAMAddr *fixed = config.fixed_addr;
   for(int i = 0; i < config.steps; i++) {
     DRAMAddr conflict_addr = fixed->add(inc.bank_increment, inc.row_increment, inc.col_increment);
@@ -376,7 +376,7 @@ void test_col_threshold(DRAMAddr row_base, int n, char *alloc_start, int alloc_s
   config.threshold_cycles = threshold_cycles;
   config.alloc_size = alloc_size;
   config.alloc_start = alloc_start;
-  config.increment = inc;
+  config.inc = inc;
   config.fixed_addr = &row_base;
   config.steps = n;
   
@@ -400,7 +400,7 @@ void test_row_threshold(DRAMAddr bank_base, int n, char *alloc_start, int alloc_
   for(int i = 0; i < n; i++) {
     DRAMAddr row_conflict_test_addr = fixed;
     measure_session_conf c = config;
-    c.increment = { 0, (max_rows - fixed.actual_row()) / n, 0 };
+    c.inc = { 0, (max_rows - fixed.actual_row()) / n, 0 };
     c.fixed_addr = &fixed;
     c.steps = n - i + 1;
     c.scope = failure_type::ROW;
@@ -410,7 +410,7 @@ void test_row_threshold(DRAMAddr bank_base, int n, char *alloc_start, int alloc_
       log_err("detected %lu failues while measuring row conflicts for %s.", failed, row_conflict_test_addr.to_string().c_str());
     }
 
-    c.increment = { 0, 1, 0 };
+    c.inc = { 0, 1, 0 };
     c.steps = 1;
     c.scope = failure_type::CLOSE_ROW;
     c.measure_fail_type = threshold_failure_t::BELOW; //if access is fast, it means we are not hitting a new row or we are hitting a different bank.
@@ -420,7 +420,7 @@ void test_row_threshold(DRAMAddr bank_base, int n, char *alloc_start, int alloc_
       log_err("detected %lu failures while measuring close-row conflict test for %s.", failed, row_conflict_test_addr.to_string().c_str());
     }
 
-    c.increment = { 1, 0, 0 };
+    c.inc = { 1, 0, 0 };
     c.steps = banks - 1;
     c.fixed_addr = &row_conflict_test_addr;
     c.measure_fail_type = threshold_failure_t::ABOVE; //if access is slow, we are hitting another row on the SAME bank.
@@ -451,7 +451,7 @@ void test_bank_threshold(int n, char *alloc_start, int alloc_size, uint64_t thre
     conf.measure_fail_type = threshold_failure_t::ABOVE; //if access is slow, we are hitting the same bank.
     conf.fixed_addr = &fixed;
     conf.steps = max;
-    conf.increment = { increment, 0, 0 };
+    conf.inc = { increment, 0, 0 };
     conf.threshold_cycles = threshold_cycles;
     conf.alloc_size = alloc_size;
     conf.alloc_start = alloc_start;
