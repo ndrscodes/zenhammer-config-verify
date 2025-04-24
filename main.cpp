@@ -358,7 +358,7 @@ uint64_t run_test(measure_session_conf config) {
     } else if(config.measure_fail_type == threshold_failure_t::INCONSISTENT) {
       threshold_failure_t current = time > config.threshold_cycles ? threshold_failure_t::ABOVE : threshold_failure_t::BELOW; 
       DRAMAddr inc_addr(conflict_virt);
-      if(current == threshold_failure_t::ABOVE && (inc_addr.row == fixed->row || inc_addr.bank != fixed->bank)) {
+      if(current == threshold_failure_t::ABOVE && (inc_addr.actual_row() == fixed->actual_row() || inc_addr.actual_bank() != fixed->actual_bank())) {
         log_err("[ERR][%s] mapping seems to be wrong between %s and %s as the measurement is not consistent with expected timing (should be BELOW). (%s with timing %lu)",
                 failure_type_str(config.scope),
                 fixed->to_string().c_str(),
@@ -366,7 +366,7 @@ uint64_t run_test(measure_session_conf config) {
                 threshold_failure_t_str(current),
                 time);
         failed = true;
-      } else if(current == threshold_failure_t::BELOW && (inc_addr.bank == fixed->bank && inc_addr.row != fixed->row)) {
+      } else if(current == threshold_failure_t::BELOW && (inc_addr.actual_bank() == fixed->actual_bank() && inc_addr.actual_row() != fixed->actual_row())) {
         log_err("[ERR][%s] mapping seems to be wrong between %s and %s as the measurement is not consistent with expected timing (should be ABOVE). (%s with timing %lu)",
                 failure_type_str(config.scope),
                 fixed->to_string().c_str(),
