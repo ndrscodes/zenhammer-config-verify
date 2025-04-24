@@ -322,43 +322,27 @@ uint64_t run_test(measure_session_conf config) {
     uint64_t time = measure_timing((volatile char *)conflict_addr.to_virt(), (volatile char *)fixed->to_virt());
     
     bool failed = false;
-    if(config.measure_fail_type == threshold_failure_t::ABOVE) {
-      if(time > config.threshold_cycles) {
-        log_err("[ERR][%s] mapping seems to be wrong between %s and %s as timing (%lu) was %lu above the calculated threshold (%lu).\n",
-                failure_type_str(config.scope),
-                fixed->to_string().c_str(),
-                conflict_addr.to_string().c_str(),
-                time,
-                time - config.threshold_cycles,
-                config.threshold_cycles);
-        failed = true;
-      } else {
-        log("[OK][%s] mapping seems to be correct between %s and %s as timing (%lu) was %lu below the calculated threshold (%lu).\n",
-                failure_type_str(config.scope),
-                fixed->to_string().c_str(),
-                conflict_addr.to_string().c_str(),
-                time,
-                config.threshold_cycles - time,
-                config.threshold_cycles);
-      }
+    if((config.measure_fail_type == threshold_failure_t::ABOVE && time > config.threshold_cycles)
+      || (config.measure_fail_type == threshold_failure_t::BELOW && time <= config.threshold_cycles)) {
+      
+      log_err("[ERR][%s] mapping seems to be wrong between %s and %s as timing (%lu) was %lu %s the calculated threshold (%lu).\n",
+              failure_type_str(config.scope),
+              fixed->to_string().c_str(),
+              conflict_addr.to_string().c_str(),
+              time,
+              config.measure_fail_type == threshold_failure_t::BELOW ? config.threshold_cycles - time : time - config.threshold_cycles,
+              config.measure_fail_type == threshold_failure_t::BELOW ? "above" : "below",
+              config.threshold_cycles);
+      failed = true;
     } else {
-      if(time <= config.threshold_cycles) {
-        log("[OK][%s] mapping seems to be wrong between %s and %s as timing (%lu) was %lu below the calculated threshold (%lu).\n",
-                failure_type_str(config.scope),
-                fixed->to_string().c_str(),
-                conflict_addr.to_string().c_str(),
-                time,
-                config.threshold_cycles - time,
-                config.threshold_cycles);
-      } else {
-        log_err("[ERR][%s] mapping seems to be correct between %s and %s as timing (%lu) was %lu above the calculated threshold (%lu).\n",
-                failure_type_str(config.scope),
-                fixed->to_string().c_str(),
-                conflict_addr.to_string().c_str(),
-                time,
-                time - config.threshold_cycles,
-                config.threshold_cycles);
-      }
+      log("[OK][%s] mapping seems to be correct between %s and %s as timing (%lu) was %lu %s the calculated threshold (%lu).\n",
+              failure_type_str(config.scope),
+              fixed->to_string().c_str(),
+              conflict_addr.to_string().c_str(),
+              time,
+              config.measure_fail_type == threshold_failure_t::BELOW ? config.threshold_cycles - time : time - config.threshold_cycles,
+              config.measure_fail_type == threshold_failure_t::BELOW ? "above" : "below",
+              config.threshold_cycles);
     }
 
     if(failed) {
