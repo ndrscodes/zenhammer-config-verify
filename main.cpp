@@ -320,6 +320,18 @@ const char* failure_type_str(failure_type type) {
   return "UNKNOWN";
 }
 
+void export_failures(const char* fname, std::vector<failure> *failures) {
+  FILE *err_file = fopen(fname, "w+");
+  if(err_file == NULL) {
+    log("unable to open failed.csv.\n");
+    return;
+  }
+
+  for(auto f : *failures) {
+    fprintf(err_file, "%p;%p;%lu;%s;%s\n", f.addr1, f.addr2, f.timing, threshold_failure_t_str(f.type), failure_type_str(f.ftype));
+  }
+}
+
 uint64_t run_test(measure_session_conf config) {
   uint64_t n_failed = 0;
   increment inc = config.inc;
@@ -355,35 +367,7 @@ uint64_t run_test(measure_session_conf config) {
               config.measure_fail_type == threshold_failure_t::BELOW ? "below" : "above",
               config.threshold_cycles);
       failed = true;
-    } else if(config.measure_fail_type == threshold_failure_t::INCONSISTENT) {
-      threshold_failure_t current = time > config.threshold_cycles ? threshold_failure_t::ABOVE : threshold_failure_t::BELOW; 
-      DRAMAddr inc_addr(conflict_virt);
-      if(current == threshold_failure_t::ABOVE && (inc_addr.actual_row() == fixed->actual_row() || inc_addr.actual_bank() != fixed->actual_bank())) {
-        log_err("[ERR][%s] mapping seems to be wrong between %s and %s as the measurement is not consistent with expected timing (should be BELOW). (%s with timing %lu)",
-                failure_type_str(config.scope),
-                fixed->to_string().c_str(),
-                DRAMAddr(conflict_virt).to_string().c_str(),
-                threshold_failure_t_str(current),
-                time);
-        failed = true;
-      } else if(current == threshold_failure_t::BELOW && (inc_addr.actual_bank() == fixed->actual_bank() && inc_addr.actual_row() != fixed->actual_row())) {
-        log_err("[ERR][%s] mapping seems to be wrong between %s and %s as the measurement is not consistent with expected timing (should be ABOVE). (%s with timing %lu)",
-                failure_type_str(config.scope),
-                fixed->to_string().c_str(),
-                DRAMAddr(conflict_virt).to_string().c_str(),
-                threshold_failure_t_str(current),
-                time);
-        failed = true;
-      } else {
-        log_err("[OK][%s] mapping seems to be correct between %s and %s as the measurement is consistent. (%s with timing %lu)",
-                failure_type_str(config.scope),
-                fixed->to_string().c_str(),
-                DRAMAddr(conflict_virt).to_string().c_str(),
-                threshold_failure_t_str(current),
-                time);
-      }
-    } 
-    else {
+    } else {
       log("[OK][%s] mapping seems to be correct between %s and %s as timing (%lu) was %lu %s the calculated threshold (%lu).\n",
               failure_type_str(config.scope),
               fixed->to_string().c_str(),
@@ -399,6 +383,56 @@ uint64_t run_test(measure_session_conf config) {
       n_failed++;
     }
   }
+
+  return n_failed;
+}
+
+uint32_t run_inconsistency_test(DRAMAddr base, int n, int step_size, char* alloc_start, size_t alloc_size, uint64_t threshold_cycles) {
+  char *base_virt = (char *)base.to_virt();
+  uint32_t n_failed = 0;
+  std::vector<failure> failures;
+  for(int i = 0; i < n; i += step_size) {
+    char *target_virt = base_virt += i;
+    if(target_virt > alloc_start + alloc_size) {
+      log("stopping inconsistency test as we are wandering outside of the allocated area.");
+      break;
+    }
+    
+    DRAMAddr target(target_virt);
+
+    uint64_t time = measure_timing((volatile char *)base_virt, (volatile char *)target_virt);
+
+    threshold_failure_t current = time > threshold_cycles ? threshold_failure_t::ABOVE : threshold_failure_t::BELOW;
+    bool failed = false;
+    if(current == threshold_failure_t::ABOVE && (target.actual_row() == base.actual_row() || target.actual_bank() != base.actual_bank())) {
+      log_err("[ERR][OFFSET] mapping seems to be wrong between %s and %s as the measurement is not consistent with expected timing (should be BELOW). (%s with timing %lu)",
+              base.to_string().c_str(),
+              target.to_string().c_str(),
+              threshold_failure_t_str(current),
+              time);
+      failed = true;
+    } else if(current == threshold_failure_t::BELOW && (target.actual_bank() == base.actual_bank() && target.actual_row() != base.actual_row())) {
+      log_err("[ERR][OFFSET] mapping seems to be wrong between %s and %s as the measurement is not consistent with expected timing (should be ABOVE). (%s with timing %lu)",
+              base.to_string().c_str(),
+              target.to_string().c_str(),
+              threshold_failure_t_str(current),
+              time);
+      failed = true;
+    } else {
+      log("[OK][OFFSET] mapping seems to be correct between %s and %s as the measurement is consistent. (%s with timing %lu)",
+              base.to_string().c_str(),
+              target.to_string().c_str(),
+              threshold_failure_t_str(current),
+              time);
+    }
+    
+    if(failed) {
+      failures.push_back({ base_virt, target_virt, time, current, failure_type::OFFSET });
+      n_failed++;
+    }
+  }
+
+  export_failures("inconsistent.csv", &failures);
 
   return n_failed;
 }
@@ -421,17 +455,6 @@ void test_col_threshold(DRAMAddr row_base, int n, char *alloc_start, int alloc_s
   uint64_t failed = run_test(config);
   if(failed) {
     log_err("column conflict test failed for base %s with %lu detected failures.", row_base.to_string().c_str(), failed);
-  }
-  
-  config.scope = failure_type::OFFSET;
-  config.inc = { 0, 0, 0, 1 };
-  config.steps = 0xffff; //this covers the lowest 8 bits. This is much less than normal column and row counts and thus should always be either row or col bits.
-  //if accesses should be all fast if they are column bits or all slow if they are row bits.
-  //if they are inconsistent, either the column bits are interleaved with row bits, or the lower bits are covered by bank bits.
-  config.measure_fail_type = INCONSISTENT;
-  failed = run_test(config);
-  if(failed) {
-    log_err("found %lu inconsistent accesses while testing the lower 4 bits of base address %s.", failed, row_base.to_string().c_str());
   }
 }
 
@@ -517,15 +540,7 @@ void test_bank_threshold(int n, char *alloc_start, int alloc_size, uint64_t thre
     }
   }
 
-  FILE *err_file = fopen("failed.csv", "w+");
-  if(err_file == NULL) {
-    log("unable to open failed.csv.\n");
-    return;
-  }
-
-  for(auto f : failed_addr) {
-    fprintf(err_file, "%p;%p;%lu;%s;%s\n", f.addr1, f.addr2, f.timing, f.type == ABOVE ? "ABOVE" : "BELOW", failure_type_str(f.ftype));
-  }
+  export_failures("failures.csv", &failed_addr);
 }
 
 bool parse_args(int argc, char *argv[]) {
@@ -557,7 +572,15 @@ int main (int argc, char *argv[]) {
   
   uint64_t threshold = find_conflict_threshold(alloc_start, N_PAGES, 8192);
   log("determined threshold to be %lu cycles.\n", threshold);
-  test_bank_threshold(1024, (char *)alloc_start, N_PAGES * PAGE_SIZE, threshold);
+
+  log("running inconsistency test...");
+  uint64_t inconsistent_addresses = run_inconsistency_test(DRAMAddr(alloc_start), 0xffffff, 1, (char *)alloc_start, N_PAGES * PAGE_SIZE, threshold);
+  log("finished inconsistency test.");
+  if(inconsistent_addresses) {
+    log_err("found %lu inconsistent address pairs.", inconsistent_addresses);
+  }
+
+  test_bank_threshold(750, (char *)alloc_start, N_PAGES * PAGE_SIZE, threshold);
 
   log("done.\n");
   return 0;
