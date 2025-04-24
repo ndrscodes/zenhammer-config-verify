@@ -275,7 +275,6 @@ typedef struct {
   size_t bank_increment;
   size_t row_increment;
   size_t col_increment;
-  size_t offset_increment;
 } increment;
 
 typedef struct {
@@ -336,11 +335,9 @@ uint64_t run_test(measure_session_conf config) {
   uint64_t n_failed = 0;
   increment inc = config.inc;
   DRAMAddr *fixed = config.fixed_addr;
-  size_t offset = 0;
   for(int i = 0; i < config.steps; i++) {
-    offset += inc.offset_increment;
     DRAMAddr conflict_addr = fixed->add(inc.bank_increment, inc.row_increment, inc.col_increment);
-    char* conflict_virt = (char *)conflict_addr.to_virt() + offset;
+    char* conflict_virt = (char *)conflict_addr.to_virt();
     void* fixed_virt = fixed->to_virt();
     if(conflict_virt == fixed_virt) {
       continue;
@@ -440,7 +437,7 @@ uint32_t run_inconsistency_test(DRAMAddr base, int n, int step_size, char* alloc
 void test_col_threshold(DRAMAddr row_base, int n, char *alloc_start, int alloc_size, uint64_t threshold_cycles, std::vector<failure> *failures) {
   size_t max_cols = DRAMConfig::get().columns();
   size_t col_increment = max_cols > n ? max_cols / n : 1;
-  increment inc = { 0, 0, col_increment, 0 };
+  increment inc = { 0, 0, col_increment};
   measure_session_conf config;
   config.scope = failure_type::COLUMN;
   config.measure_fail_type = threshold_failure_t::ABOVE; //accesses on the same column should be fast.
@@ -463,7 +460,6 @@ void test_row_threshold(DRAMAddr bank_base, int n, char *alloc_start, int alloc_
   uint64_t banks = DRAMConfig::get().banks();
   DRAMAddr fixed = bank_base;
   measure_session_conf config;
-  config.steps = n;
   config.alloc_start = alloc_start;
   config.alloc_size = alloc_size;
   config.failures = failures;
@@ -472,7 +468,8 @@ void test_row_threshold(DRAMAddr bank_base, int n, char *alloc_start, int alloc_
   for(int i = 0; i < n; i++) {
     DRAMAddr row_conflict_test_addr = fixed;
     measure_session_conf c = config;
-    c.inc = { 0, (max_rows - fixed.actual_row()) / n, 0, 0 };
+    c.steps = max_rows - fixed.actual_row() > n ? n : max_rows - fixed.actual_row();
+    c.inc = { 0, (max_rows - fixed.actual_row()) / c.steps, 0 };
     c.fixed_addr = &fixed;
     c.steps = n - i + 1;
     c.scope = failure_type::ROW;
@@ -482,7 +479,7 @@ void test_row_threshold(DRAMAddr bank_base, int n, char *alloc_start, int alloc_
       log_err("detected %lu failues while measuring row conflicts for %s.", failed, row_conflict_test_addr.to_string().c_str());
     }
 
-    c.inc = { 0, 1, 0, 0 };
+    c.inc = { 0, 1, 0 };
     c.steps = 1;
     c.scope = failure_type::CLOSE_ROW;
     c.measure_fail_type = threshold_failure_t::BELOW; //if access is fast, it means we are not hitting a new row or we are hitting a different bank.
@@ -492,7 +489,7 @@ void test_row_threshold(DRAMAddr bank_base, int n, char *alloc_start, int alloc_
       log_err("detected %lu failures while measuring close-row conflict test for %s.", failed, row_conflict_test_addr.to_string().c_str());
     }
 
-    c.inc = { 1, 0, 0, 0 };
+    c.inc = { 1, 0, 0 };
     c.steps = banks - 1;
     c.fixed_addr = &row_conflict_test_addr;
     c.measure_fail_type = threshold_failure_t::ABOVE; //if access is slow, we are hitting another row on the SAME bank.
@@ -523,7 +520,7 @@ void test_bank_threshold(int n, char *alloc_start, int alloc_size, uint64_t thre
     conf.measure_fail_type = threshold_failure_t::ABOVE; //if access is slow, we are hitting the same bank.
     conf.fixed_addr = &fixed;
     conf.steps = max;
-    conf.inc = { increment, 0, 0, 0 };
+    conf.inc = { increment, 0, 0 };
     conf.threshold_cycles = threshold_cycles;
     conf.alloc_size = alloc_size;
     conf.alloc_start = alloc_start;
