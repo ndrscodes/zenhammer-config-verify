@@ -47,25 +47,26 @@ typedef struct {
 
 bool verbose = false;
 
-void log_v(std::string text, bool force, ...) {
+void log_v(bool force, std::string text, ...) {
   if(!verbose && !force) {
     return;
   }
-  va_list args;
   if(text.compare(text.length() - 1, 1, "\n") != 0) {
     text.append("\n");
   }
-  printf(text.c_str(), args);
+  va_list args;
+  va_start(args, text);
+  vprintf(text.c_str(), args);
 }
 
 void log_err(std::string text, ...) {
   va_list args;
-  log_v(text, true, args);
+  log_v(true, text, args);
 }
 
 void log(std::string text, ...) {
   va_list args;
-  log_v(text, false, args);
+  log_v(false, text, args);
 }
 
 void* allocate(size_t n_pages) {
