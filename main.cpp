@@ -331,7 +331,7 @@ uint64_t run_test(measure_session_conf config) {
               conflict_addr.to_string().c_str(),
               time,
               config.measure_fail_type == threshold_failure_t::BELOW ? config.threshold_cycles - time : time - config.threshold_cycles,
-              config.measure_fail_type == threshold_failure_t::BELOW ? "above" : "below",
+              config.measure_fail_type == threshold_failure_t::BELOW ? "below" : "above",
               config.threshold_cycles);
       failed = true;
     } else {
@@ -340,7 +340,7 @@ uint64_t run_test(measure_session_conf config) {
               fixed->to_string().c_str(),
               conflict_addr.to_string().c_str(),
               time,
-              config.measure_fail_type == threshold_failure_t::BELOW ? config.threshold_cycles - time : time - config.threshold_cycles,
+              config.measure_fail_type == threshold_failure_t::BELOW ? time - config.threshold_cycles : config.threshold_cycles - time,
               config.measure_fail_type == threshold_failure_t::BELOW ? "above" : "below",
               config.threshold_cycles);
     }
