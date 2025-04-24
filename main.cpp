@@ -256,11 +256,11 @@ uint64_t find_conflict_threshold(void *alloc_start, size_t allocated_pages, size
 }
 
 enum threshold_failure_t {
-  ABOVE, BELOW
+  ABOVE, BELOW, INCONSISTENT
 };
 
 enum failure_type {
-  BANK, INTER_BANK, ROW, CLOSE_ROW, COLUMN
+  BANK, INTER_BANK, ROW, CLOSE_ROW, COLUMN, OFFSET
 };
 
 typedef struct {
@@ -275,6 +275,7 @@ typedef struct {
   size_t bank_increment;
   size_t row_increment;
   size_t col_increment;
+  size_t offset_increment;
 } increment;
 
 typedef struct {
@@ -289,6 +290,18 @@ typedef struct {
   std::vector<failure> *failures;
 } measure_session_conf;
 
+const char* threshold_failure_t_str(threshold_failure_t type) {
+  switch(type) {
+    case threshold_failure_t::ABOVE:
+      return "ABOVE";
+    case threshold_failure_t::BELOW:
+      return "BELOW";
+    case threshold_failure_t::INCONSISTENT:
+      return "INCONSISTENT";
+  }
+  return "UNKNOWN";
+}
+
 const char* failure_type_str(failure_type type) {
   switch(type) {
     case failure_type::BANK:
@@ -301,6 +314,8 @@ const char* failure_type_str(failure_type type) {
       return "CLOSE_ROW";
     case failure_type::INTER_BANK:
       return "INTER_BANK";
+    case failure_type::OFFSET:
+      return "OFFSET";
   }
   return "UNKNOWN";
 }
@@ -309,9 +324,13 @@ uint64_t run_test(measure_session_conf config) {
   uint64_t n_failed = 0;
   increment inc = config.inc;
   DRAMAddr *fixed = config.fixed_addr;
+  size_t offset = 0;
+  bool first = true;
+  threshold_failure_t first_timing_type;
   for(int i = 0; i < config.steps; i++) {
+    offset += inc.offset_increment;
     DRAMAddr conflict_addr = fixed->add(inc.bank_increment, inc.row_increment, inc.col_increment);
-    void* conflict_virt = conflict_addr.to_virt();
+    char* conflict_virt = (char *)conflict_addr.to_virt() + offset;
     void* fixed_virt = fixed->to_virt();
     if(conflict_virt == fixed_virt) {
       continue;
@@ -338,7 +357,35 @@ uint64_t run_test(measure_session_conf config) {
               config.measure_fail_type == threshold_failure_t::BELOW ? "below" : "above",
               config.threshold_cycles);
       failed = true;
-    } else {
+    } else if(config.measure_fail_type == threshold_failure_t::INCONSISTENT) {
+      threshold_failure_t current = time > config.threshold_cycles ? threshold_failure_t::ABOVE : threshold_failure_t::BELOW; 
+      
+      if(first) {
+        first_timing_type = current;
+        first = false;
+        log("measured first timing for inconsistency measurement to be of type %s between %s and %s (%s(+%lu)) with a timing of %lu vs threshold %lu.",
+            threshold_failure_t_str(current),
+            fixed->to_string().c_str(),
+            DRAMAddr(conflict_virt).to_string().c_str(),
+            fixed->to_string().c_str(),
+            offset,
+            time,
+            config.threshold_cycles);
+        continue;
+      }
+
+      if(first_timing_type != current) {
+        log_err("[ERR][%s] mapping seems to be wrong between %s and %s as the measurement is not consistent. (%s instead of %s with timing %lu)",
+                failure_type_str(config.scope),
+                fixed->to_string().c_str(),
+                conflict_addr.to_string().c_str(),
+                threshold_failure_t_str(current),
+                threshold_failure_t_str(first_timing_type),
+                time);
+        failed = true;
+      }
+    } 
+    else {
       log("[OK][%s] mapping seems to be correct between %s and %s as timing (%lu) was %lu %s the calculated threshold (%lu).\n",
               failure_type_str(config.scope),
               fixed->to_string().c_str(),
@@ -359,7 +406,9 @@ uint64_t run_test(measure_session_conf config) {
 }
 
 void test_col_threshold(DRAMAddr row_base, int n, char *alloc_start, int alloc_size, uint64_t threshold_cycles, std::vector<failure> *failures) {
-  increment inc = { 0, 0, DRAMConfig::get().columns() / n };
+  size_t max_cols = DRAMConfig::get().columns();
+  size_t col_increment = max_cols > n ? max_cols / n : 1;
+  increment inc = { 0, 0, col_increment, 0 };
   measure_session_conf config;
   config.scope = failure_type::COLUMN;
   config.measure_fail_type = threshold_failure_t::ABOVE; //accesses on the same column should be fast.
@@ -374,6 +423,17 @@ void test_col_threshold(DRAMAddr row_base, int n, char *alloc_start, int alloc_s
   uint64_t failed = run_test(config);
   if(failed) {
     log_err("column conflict test failed for base %s with %lu detected failures.", row_base.to_string().c_str(), failed);
+  }
+  
+  config.scope = failure_type::OFFSET;
+  config.inc = { 0, 0, 0, 1 };
+  config.steps = 0x0f; //this covers the lowest 4 bits. This is much less than normal column and row counts and thus should always be either row or col bits.
+  //if accesses should be all fast if they are column bits or all slow if they are row bits.
+  //if they are inconsistent, either the column bits are interleaved with row bits, or the lower bits are covered by bank bits.
+  config.measure_fail_type = INCONSISTENT;
+  failed = run_test(config);
+  if(failed) {
+    log_err("found %lu inconsistent accesses while testing the lower 4 bits of base address %s.", failed, row_base.to_string().c_str());
   }
 }
 
