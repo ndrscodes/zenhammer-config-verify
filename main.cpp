@@ -302,6 +302,7 @@ const char* failure_type_str(failure_type type) {
     case failure_type::INTER_BANK:
       return "INTER_BANK";
   }
+  return "UNKNOWN";
 }
 
 uint64_t run_test(measure_session_conf config) {
