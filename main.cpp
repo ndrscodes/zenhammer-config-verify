@@ -491,6 +491,7 @@ bool parse_args(int argc, char *argv[]) {
       log("unknown option provided (%s). The only valid option is -v or --verbose for now.\n", argv[i]);
       return false;
     }
+    i++;
   } while(i < argc);
   return true;
 }
