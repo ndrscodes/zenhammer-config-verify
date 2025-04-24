@@ -312,6 +312,10 @@ uint64_t run_test(measure_session_conf config) {
   for(int i = 0; i < config.steps; i++) {
     DRAMAddr conflict_addr = fixed->add(inc.bank_increment, inc.row_increment, inc.col_increment);
     void* conflict_virt = conflict_addr.to_virt();
+    void* fixed_virt = fixed->to_virt();
+    if(conflict_virt == fixed_virt) {
+      continue;
+    }
     if(conflict_virt < config.alloc_start || conflict_virt > config.alloc_start + config.alloc_size) {
       log_err("stopping test type %s for %s because we tried accessing an address outside of the allocated space.\n",
               failure_type_str(config.scope),
@@ -319,7 +323,7 @@ uint64_t run_test(measure_session_conf config) {
       break;
     }
 
-    uint64_t time = measure_timing((volatile char *)conflict_addr.to_virt(), (volatile char *)fixed->to_virt());
+    uint64_t time = measure_timing((volatile char *)conflict_virt, (volatile char *)fixed_virt);
     
     bool failed = false;
     if((config.measure_fail_type == threshold_failure_t::ABOVE && time > config.threshold_cycles)
