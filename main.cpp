@@ -435,7 +435,7 @@ void test_col_threshold(DRAMAddr row_base, int n, char *alloc_start, int alloc_s
   
   config.scope = failure_type::OFFSET;
   config.inc = { 0, 0, 0, 1 };
-  config.steps = 0xff; //this covers the lowest 8 bits. This is much less than normal column and row counts and thus should always be either row or col bits.
+  config.steps = 0xffff; //this covers the lowest 8 bits. This is much less than normal column and row counts and thus should always be either row or col bits.
   //if accesses should be all fast if they are column bits or all slow if they are row bits.
   //if they are inconsistent, either the column bits are interleaved with row bits, or the lower bits are covered by bank bits.
   config.measure_fail_type = INCONSISTENT;
