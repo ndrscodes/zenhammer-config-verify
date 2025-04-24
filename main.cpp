@@ -379,7 +379,7 @@ uint64_t run_test(measure_session_conf config) {
         log_err("[ERR][%s] mapping seems to be wrong between %s and %s as the measurement is not consistent. (%s instead of %s with timing %lu)",
                 failure_type_str(config.scope),
                 fixed->to_string().c_str(),
-                conflict_addr.to_string().c_str(),
+                DRAMAddr(conflict_virt).to_string().c_str(),
                 threshold_failure_t_str(current),
                 threshold_failure_t_str(first_timing_type),
                 time);
@@ -388,7 +388,7 @@ uint64_t run_test(measure_session_conf config) {
         log_err("[OK][%s] mapping seems to be correct between %s and %s as the measurement is consistent. (%s with timing %lu)",
                 failure_type_str(config.scope),
                 fixed->to_string().c_str(),
-                conflict_addr.to_string().c_str(),
+                DRAMAddr(conflict_virt).to_string().c_str(),
                 threshold_failure_t_str(current),
                 time);
       }
@@ -567,7 +567,7 @@ int main (int argc, char *argv[]) {
   
   uint64_t threshold = find_conflict_threshold(alloc_start, N_PAGES, 8192);
   log("determined threshold to be %lu cycles.\n", threshold);
-  test_bank_threshold(750, (char *)alloc_start, N_PAGES * PAGE_SIZE, threshold);
+  test_bank_threshold(1024, (char *)alloc_start, N_PAGES * PAGE_SIZE, threshold);
 
   log("done.\n");
   return 0;
