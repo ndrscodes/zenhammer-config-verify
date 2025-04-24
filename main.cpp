@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <cmath>
+#include <cstdarg>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -9,6 +10,7 @@
 #include <emmintrin.h>
 #include <immintrin.h>
 #include <random>
+#include <string>
 #include <sys/mman.h>
 #include <unistd.h>
 #include <vector>
@@ -43,6 +45,29 @@ typedef struct {
   uint32_t count;
 } bucket;
 
+bool verbose = false;
+
+void log_v(std::string text, bool force, ...) {
+  if(!verbose && !force) {
+    return;
+  }
+  va_list args;
+  if(text.compare(text.length() - 1, 1, "\n") != 0) {
+    text.append("\n");
+  }
+  printf(text.c_str(), args);
+}
+
+void log_err(std::string text, ...) {
+  va_list args;
+  log_v(text, true, args);
+}
+
+void log(std::string text, ...) {
+  va_list args;
+  log_v(text, false, args);
+}
+
 void* allocate(size_t n_pages) {
   uint64_t huge_map = 0;
   if(PAGE_SIZE == PAGE_1GB) {
@@ -52,11 +77,11 @@ void* allocate(size_t n_pages) {
   }
   void* res = mmap(NULL, n_pages * PAGE_SIZE, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE | MAP_HUGETLB | huge_map | MAP_POPULATE, -1, 0);
   if(res == MAP_FAILED) {
-    printf("memory allocation failed (%s)\n", strerror(errno));
+    log("memory allocation failed (%s)\n", strerror(errno));
     exit(EXIT_FAILURE);
   }
   memset(res, 0x42, n_pages * PAGE_SIZE);
-  printf("allocated %lu bytes of memory.\n", n_pages * PAGE_SIZE);
+  log("allocated %lu bytes of memory.\n", n_pages * PAGE_SIZE);
   return res;
 }
 
@@ -93,7 +118,7 @@ uint64_t measure_timing(volatile char *addr1, volatile char *addr2) {
   std::vector<uint64_t> avgs;
   avgs.reserve(N_AVGS_PER_MEASUREMENT);
 
-  printf("measuring timing between %s and %s\n", DRAMAddr((void *)addr1).to_string().c_str(), DRAMAddr((void *)addr2).to_string().c_str());
+  log("measuring timing between %s and %s\n", DRAMAddr((void *)addr1).to_string().c_str(), DRAMAddr((void *)addr2).to_string().c_str());
 
   for(int i = 0; i < N_AVGS_PER_MEASUREMENT; i++) {
     sched_yield();
@@ -165,7 +190,7 @@ std::vector<activity> find_major_areas(bucket histogram[], size_t buckets) {
   res.push_back({start, buckets - 1, above});
 
   for(activity a : res) {
-    printf("area from %lu to %lu with activity %s\n", a.start, a.end, a.high_activity ? "HIGH" : "LOW");
+    log("area from %lu to %lu with activity %s\n", a.start, a.end, a.high_activity ? "HIGH" : "LOW");
   }
 
   return res;
@@ -182,18 +207,18 @@ uint64_t find_conflict_threshold(void *alloc_start, size_t allocated_pages, size
     samples.push_back(access_time);
   }
 
-  printf("created %lu samples", samples.size());
+  log("created %lu samples", samples.size());
 
   auto hist = to_hist(samples, N_BUCKETS);
   std::sort(samples.begin(), samples.end());
-  printf("theoretical threshold for 16 banks is %lu\n", samples[samples.size() * (15.0 / 16.0)]);
+  log("theoretical threshold for 16 banks is %lu\n", samples[samples.size() * (15.0 / 16.0)]);
   for(size_t i = 0; i < N_BUCKETS; i++) {
-    printf("hist %lu at %f to %f: %d\n", i, hist[i].ar.lower_bound, hist[i].ar.upper_bound, hist[i].count);
+    log("hist %lu at %f to %f: %d\n", i, hist[i].ar.lower_bound, hist[i].ar.upper_bound, hist[i].count);
   }
 
   std::vector<activity> areas = find_major_areas(hist, N_BUCKETS);
   if(areas.size() < 2) {
-    printf("error: only able to identify %lu areas, expected at least 2.\n", areas.size());
+    log("error: only able to identify %lu areas, expected at least 2.\n", areas.size());
     exit(EXIT_FAILURE);
   }
 
@@ -206,7 +231,7 @@ uint64_t find_conflict_threshold(void *alloc_start, size_t allocated_pages, size
   }
 
   if(i >= areas.size()) {
-    printf("unable to identify area of high activity. Something has gone horribly wrong.\n");
+    log("unable to identify area of high activity. Something has gone horribly wrong.\n");
     exit(EXIT_FAILURE);
   }
 
@@ -223,7 +248,7 @@ uint64_t find_conflict_threshold(void *alloc_start, size_t allocated_pages, size
     }
   }
 
-  printf("ratio was %f\n", ((double_t)above_threshold) / samples.size());
+  log("ratio was %f\n", ((double_t)above_threshold) / samples.size());
 
   return threshold;
 }
@@ -232,40 +257,132 @@ enum threshold_failure_t {
   ABOVE, BELOW
 };
 
+enum failure_type {
+  BANK, INTER_BANK, ROW, CLOSE_ROW, COLUMN
+};
+
 typedef struct {
   void *addr1;
   void *addr2;
   uint64_t timing;
   threshold_failure_t type;
+  failure_type ftype;
 } failure;
 
-void test_col_threshold(DRAMAddr row_base, int n, char *alloc_start, int alloc_size, uint64_t threshold_cycles, std::vector<failure> *failures) {
-  DRAMAddr col_fixed = row_base;
-  DRAMAddr col_conflict_test_addr = row_base;
-  for(int j = 0; j < n; j++) {
-    col_conflict_test_addr.add_inplace(0, 0, DRAMConfig::get().columns() / n);
-    printf("testing for same-row access between %s and %s. This should result in no conflict being detected.\n", 
-           col_fixed.to_string().c_str(), 
-           col_conflict_test_addr.to_string().c_str());
+typedef struct {
+  size_t bank_increment;
+  size_t row_increment;
+  size_t col_increment;
+} increment;
 
-    if(col_conflict_test_addr.to_virt() > alloc_start + alloc_size) {
-      printf("stopping test as address %s is outside of the allocated area.\n", col_conflict_test_addr.to_string().c_str());
+typedef struct {
+  DRAMAddr *fixed_addr;
+  int steps;
+  increment increment;
+  threshold_failure_t measure_fail_type;
+  failure_type scope;
+  char *alloc_start;
+  size_t alloc_size;
+  uint64_t threshold_cycles;
+  std::vector<failure> *failures;
+} measure_session_conf;
+
+const char* failure_type_str(failure_type type) {
+  switch(type) {
+    case failure_type::BANK:
+      return "BANK";
+    case failure_type::ROW:
+      return "ROW";
+    case failure_type::COLUMN:
+      return "COLUMN";
+    case failure_type::CLOSE_ROW:
+      return "CLOSE_ROW";
+    case failure_type::INTER_BANK:
+      return "INTER_BANK";
+  }
+}
+
+uint64_t run_test(measure_session_conf config) {
+  uint64_t n_failed = 0;
+  increment inc = config.increment;
+  DRAMAddr *fixed = config.fixed_addr;
+  for(int i = 0; i < config.steps; i++) {
+    DRAMAddr conflict_addr = fixed->add(inc.bank_increment, inc.row_increment, inc.col_increment);
+    void* conflict_virt = conflict_addr.to_virt();
+    if(conflict_virt < config.alloc_start || conflict_virt > config.alloc_start + config.alloc_size) {
+      log_err("stopping test type %s for %s because we tried accessing an address outside of the allocated space.\n",
+              failure_type_str(config.scope),
+              conflict_addr.to_string().c_str());
       break;
     }
 
-    uint64_t time = measure_timing((volatile char *)col_fixed.to_virt(), (volatile char *)col_conflict_test_addr.to_virt());
-    if(time <= threshold_cycles) {
-      printf("[OK][COL] address %s seems to be in the same row as it does not the row threshold (timing: %lu)\n", 
-             col_conflict_test_addr.to_string().c_str(), 
-             time);
+    uint64_t time = measure_timing((volatile char *)conflict_addr.to_virt(), (volatile char *)fixed->to_virt());
+    
+    bool failed = false;
+    if(config.measure_fail_type == threshold_failure_t::ABOVE) {
+      if(time > config.threshold_cycles) {
+        log_err("[ERR][%s] mapping seems to be wrong between %s and %s as timing (%lu) was %lu above the calculated threshold (%lu).\n",
+                failure_type_str(config.scope),
+                fixed->to_string().c_str(),
+                conflict_addr.to_string().c_str(),
+                time,
+                time - config.threshold_cycles,
+                config.threshold_cycles);
+        failed = true;
+      } else {
+        log("[OK][%s] mapping seems to be correct between %s and %s as timing (%lu) was %lu below the calculated threshold (%lu).\n",
+                failure_type_str(config.scope),
+                fixed->to_string().c_str(),
+                conflict_addr.to_string().c_str(),
+                time,
+                config.threshold_cycles - time,
+                config.threshold_cycles);
+      }
     } else {
-      printf("[ERR][COL] address mapping seems to be wrong for address %s as it is %lu below the threshold (defined as %lu). Timing was %lu.\n", 
-             col_conflict_test_addr.to_string().c_str(), 
-             threshold_cycles - time, 
-             threshold_cycles, 
-             time);
-      failures->push_back({ col_fixed.to_virt(), col_conflict_test_addr.to_virt(), time, time < threshold_cycles ? threshold_failure_t::BELOW : threshold_failure_t::ABOVE });
+      if(time <= config.threshold_cycles) {
+        log("[OK][%s] mapping seems to be wrong between %s and %s as timing (%lu) was %lu below the calculated threshold (%lu).\n",
+                failure_type_str(config.scope),
+                fixed->to_string().c_str(),
+                conflict_addr.to_string().c_str(),
+                time,
+                config.threshold_cycles - time,
+                config.threshold_cycles);
+      } else {
+        log_err("[ERR][%s] mapping seems to be correct between %s and %s as timing (%lu) was %lu above the calculated threshold (%lu).\n",
+                failure_type_str(config.scope),
+                fixed->to_string().c_str(),
+                conflict_addr.to_string().c_str(),
+                time,
+                time - config.threshold_cycles,
+                config.threshold_cycles);
+      }
     }
+
+    if(failed) {
+      config.failures->push_back({ fixed->to_virt(), conflict_virt, time, config.measure_fail_type, config.scope });
+      n_failed++;
+    }
+  }
+
+  return n_failed;
+}
+
+void test_col_threshold(DRAMAddr row_base, int n, char *alloc_start, int alloc_size, uint64_t threshold_cycles, std::vector<failure> *failures) {
+  increment inc = { 0, 0, DRAMConfig::get().columns() / n };
+  measure_session_conf config;
+  config.scope = failure_type::COLUMN;
+  config.measure_fail_type = threshold_failure_t::ABOVE; //accesses on the same column should be fast.
+  config.failures = failures;
+  config.threshold_cycles = threshold_cycles;
+  config.alloc_size = alloc_size;
+  config.alloc_start = alloc_start;
+  config.increment = inc;
+  config.fixed_addr = &row_base;
+  config.steps = n;
+  
+  uint64_t failed = run_test(config);
+  if(failed) {
+    log_err("column conflict test failed for base %s with %lu detected failures.", row_base.to_string().c_str(), failed);
   }
 }
 
@@ -273,74 +390,46 @@ void test_row_threshold(DRAMAddr bank_base, int n, char *alloc_start, int alloc_
   uint64_t max_rows = DRAMConfig::get().rows();
   uint64_t banks = DRAMConfig::get().banks();
   DRAMAddr fixed = bank_base;
+  measure_session_conf config;
+  config.steps = n;
+  config.alloc_start = alloc_start;
+  config.alloc_size = alloc_size;
+  config.failures = failures;
+  config.threshold_cycles = threshold_cycles;
+
   for(int i = 0; i < n; i++) {
     DRAMAddr row_conflict_test_addr = fixed;
-    for(int j = i + 1; j < n; j++) {
-      printf("fixed row test %d/%d (%d, %d)\n", i * j, n * n, i, j);
-      row_conflict_test_addr.add_inplace(0, (max_rows - fixed.actual_row()) / n, 0);
-      printf("testing address %s against %s. This should result in a row conflict.\n", row_conflict_test_addr.to_string().c_str(), fixed.to_string().c_str());
-      if(row_conflict_test_addr.to_virt() > alloc_start + alloc_size) {
-        printf("stopping because test address exceeds the allocated space (%p)\n", alloc_start + alloc_size);
-        break;
-      }
-      uint64_t time = measure_timing((volatile char *)fixed.to_virt(), (volatile char *)row_conflict_test_addr.to_virt());
-      if(time > threshold_cycles) {
-        printf("[OK][ROW] address %s seems to be in another row as it exceeds the row threshold (%lu) by %lu (timing: %lu)\n", 
-               row_conflict_test_addr.to_string().c_str(), 
-               threshold_cycles, 
-               time - threshold_cycles, 
-               time);
-      } else {
-        printf("[ERR][ROW] address mapping seems to be wrong for address %s as it is %lu below the threshold (defined as %lu). Timing was %lu.\n", 
-               row_conflict_test_addr.to_string().c_str(), 
-               threshold_cycles - time, 
-               threshold_cycles, 
-               time);
-        failures->push_back({ fixed.to_virt(), row_conflict_test_addr.to_virt(), time, time < threshold_cycles ? threshold_failure_t::BELOW : threshold_failure_t::ABOVE });
-      }
+    measure_session_conf c = config;
+    c.increment = { 0, (max_rows - fixed.actual_row()) / n, 0 };
+    c.fixed_addr = &fixed;
+    c.steps = n - i + 1;
+    c.scope = failure_type::ROW;
+    c.measure_fail_type = threshold_failure_t::BELOW; //if access is fast, it means we are still on the same row or a different bank.
+    uint64_t failed = run_test(c);
+    if(failed) {
+      log_err("detected %lu failues while measuring row conflicts for %s.", failed, row_conflict_test_addr.to_string().c_str());
     }
 
-    row_conflict_test_addr = fixed.add(0, 1, 0);
-    if(row_conflict_test_addr.to_virt() > alloc_start + alloc_size) {
-      printf("skipping bank conflict test for %s because it would exceed the allocated area.\n", row_conflict_test_addr.to_string().c_str());
-      break;
-    }
-    uint64_t time = measure_timing((volatile char *)fixed.to_virt(), (volatile char *)row_conflict_test_addr.to_virt());
-    printf("running close-row check (%s and %s)...\n", fixed.to_string().c_str(), row_conflict_test_addr.to_string().c_str());
-    if(time > threshold_cycles) {
-      printf("[OK][CLOSE_ROW] address %s seems to be in the same bank as it exceeds the row threshold (%lu) by %lu (timing: %lu)\n", 
-             row_conflict_test_addr.to_string().c_str(), 
-             threshold_cycles, 
-             time - threshold_cycles, 
-             time);
-    } else {
-      printf("[ERR][CLOSE_ROW] address mapping for %s seems to be wrong, expected timing above threshold (defined as %lu). Timing was %lu.\n", 
-             row_conflict_test_addr.to_string().c_str(), 
-             threshold_cycles, 
-             time);
+    c.increment = { 0, 1, 0 };
+    c.steps = 1;
+    c.scope = failure_type::CLOSE_ROW;
+    c.measure_fail_type = threshold_failure_t::BELOW; //if access is fast, it means we are not hitting a new row or we are hitting a different bank.
+    c.fixed_addr = &row_conflict_test_addr;
+    failed = run_test(c);
+    if(failed) {
+      log_err("detected %lu failures while measuring close-row conflict test for %s.", failed, row_conflict_test_addr.to_string().c_str());
     }
 
-    for(int j = 1; j < banks; j++) {
-      DRAMAddr other_bank_addr = fixed.add(j, 1, 0);
-      if(other_bank_addr.to_virt() > alloc_start + alloc_size) {
-        printf("skipping bank conflict test for %s because it would exceed the allocated area.\n", other_bank_addr.to_string().c_str());
-        break;
-      }
-      uint64_t time = measure_timing((volatile char *)fixed.to_virt(), (volatile char *)other_bank_addr.to_virt());
-      if(time > threshold_cycles) {
-        printf("[ERR][INTER_BANK] address %s seems to be in the same bank as it exceeds the row threshold (%lu) by %lu (timing: %lu)\n", 
-               row_conflict_test_addr.to_string().c_str(), 
-               threshold_cycles, 
-               time - threshold_cycles, 
-               time);
-        failures->push_back({ fixed.to_virt(), row_conflict_test_addr.to_virt(), time, time < threshold_cycles ? threshold_failure_t::BELOW : threshold_failure_t::ABOVE });
-      } else {
-        printf("[OK][INTER_BANK] address mapping for %s seems to be ok, expected timing below threshold (defined as %lu) due to parallel bank access. Timing was %lu.\n", 
-               row_conflict_test_addr.to_string().c_str(), 
-               threshold_cycles, 
-               time);
-      }
+    c.increment = { 1, 0, 0 };
+    c.steps = banks - 1;
+    c.fixed_addr = &row_conflict_test_addr;
+    c.measure_fail_type = threshold_failure_t::ABOVE; //if access is slow, we are hitting another row on the SAME bank.
+    c.scope = failure_type::INTER_BANK;
+    failed = run_test(c);
+    if(failed) {
+      log_err("detected %lu failures while measuring inter-bank conflict test for %s.", failed, row_conflict_test_addr.to_string().c_str());
     }
+    
     test_col_threshold(row_conflict_test_addr, n, alloc_start, alloc_size, threshold_cycles, failures);
     fixed.add_inplace(0, (max_rows / n), 0);
     if(fixed.to_virt() > alloc_start + alloc_size) {
@@ -352,38 +441,28 @@ void test_row_threshold(DRAMAddr bank_base, int n, char *alloc_start, int alloc_
 void test_bank_threshold(int n, char *alloc_start, int alloc_size, uint64_t threshold_cycles) {
   uint64_t max_banks = DRAMConfig::get().banks();
   DRAMAddr fixed(alloc_start);
-  int increment = n > max_banks ? 1 : max_banks / n;
-  printf("bank increment set to %d\n", increment);
+  size_t increment = n > max_banks ? 1 : max_banks / n;
+  log("bank increment set to %d\n", increment);
   int max = n > max_banks ? max_banks : n;
   std::vector<failure> failed_addr;
   for(int i = 0; i < max; i += increment) {
-    DRAMAddr bank_conflict_test_addr = fixed;
-    for(int j = i + 1; j < max; j += increment) {
-      bank_conflict_test_addr.add_inplace(increment, 0, 0);
-      printf("testing address %s against %s. This should result in fast timing.\n", bank_conflict_test_addr.to_string().c_str(), fixed.to_string().c_str());
-      if(bank_conflict_test_addr.to_virt() > alloc_start + alloc_size) {
-        printf("stopping because test address exceeds the allocated space (%p)\n", alloc_start + alloc_size);
-        break;
-      }
-      uint64_t time = measure_timing((volatile char *)fixed.to_virt(), (volatile char *)bank_conflict_test_addr.to_virt());
-      if(time < threshold_cycles) {
-        printf("[OK][BANK] address %s seems to be in a different bank as its access time is below the conflict threshold (%lu) (timing: %lu)\n", 
-               bank_conflict_test_addr.to_string().c_str(), 
-               threshold_cycles, 
-               time);
-      } else {
-        printf("[ERR][BANK] address %s seems to be in the same bank as it is %lu above the threshold (defined as %lu). Timing was %lu.\n", 
-               bank_conflict_test_addr.to_string().c_str(), 
-               time - threshold_cycles, 
-               threshold_cycles, 
-               time);
-        failed_addr.push_back({ fixed.to_virt(), bank_conflict_test_addr.to_virt(), time, time < threshold_cycles ? threshold_failure_t::BELOW : threshold_failure_t::ABOVE });
-        break;
-      }
+    measure_session_conf conf;
+    conf.scope = failure_type::BANK;
+    conf.measure_fail_type = threshold_failure_t::ABOVE; //if access is slow, we are hitting the same bank.
+    conf.fixed_addr = &fixed;
+    conf.steps = max;
+    conf.increment = { increment, 0, 0 };
+    conf.threshold_cycles = threshold_cycles;
+    conf.alloc_size = alloc_size;
+    conf.alloc_start = alloc_start;
+    uint64_t failed = run_test(conf);
+    if(failed) {
+      log_err("bank conflict test failed %lu times for %s.", failed, fixed.to_string().c_str());
     }
+    
     test_row_threshold(fixed, n, alloc_start, alloc_size, threshold_cycles, &failed_addr);
     fixed.add_inplace(increment, 0, 0);
-    printf("increased bank by %d.\n", increment);
+    log("increased bank by %d.\n", increment);
     if(fixed.to_virt() > alloc_start + alloc_size) {
       break;
     }
@@ -391,25 +470,45 @@ void test_bank_threshold(int n, char *alloc_start, int alloc_size, uint64_t thre
 
   FILE *err_file = fopen("failed.csv", "w+");
   if(err_file == NULL) {
-    printf("unable to open failed.csv.\n");
+    log("unable to open failed.csv.\n");
     return;
   }
 
   for(auto f : failed_addr) {
-    fprintf(err_file, "%p;%p;%lu;%s\n", f.addr1, f.addr2, f.timing, f.type == ABOVE ? "ABOVE" : "BELOW");
+    fprintf(err_file, "%p;%p;%lu;%s;%s\n", f.addr1, f.addr2, f.timing, f.type == ABOVE ? "ABOVE" : "BELOW", failure_type_str(f.ftype));
   }
 }
 
+bool parse_args(int argc, char *argv[]) {
+  if(argc == 1) {
+    return true;
+  }
+  int i = 1;
+  do {
+    if(strncmp(argv[i], "-v", 2) == 0 || strncmp(argv[i], "--verbose", 2) == 0) {
+      verbose = true;
+    } else {
+      log("unknown option provided (%s). The only valid option is -v or --verbose for now.\n", argv[i]);
+      return false;
+    }
+  } while(i < argc);
+  return true;
+}
+
 int main (int argc, char *argv[]) {
-  printf("allocating pages...\n");
+  if(!parse_args(argc, argv)) {
+    exit(EXIT_FAILURE);
+  }
+
+  log("allocating pages...\n");
   void *alloc_start = allocate(N_PAGES);
   DRAMConfig::select_config(Microarchitecture::AMD_ZEN_3, 1, 4, 4, false);
   DRAMAddr::initialize_mapping(0, (volatile char *)alloc_start);
   
   uint64_t threshold = find_conflict_threshold(alloc_start, N_PAGES, 8192);
-  printf("determined threshold to be %lu cycles.\n", threshold);
+  log("determined threshold to be %lu cycles.\n", threshold);
   test_bank_threshold(750, (char *)alloc_start, N_PAGES * PAGE_SIZE, threshold);
 
-  printf("done.\n");
+  log("done.\n");
   return 0;
 }
