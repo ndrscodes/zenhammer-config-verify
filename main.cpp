@@ -335,8 +335,9 @@ uint64_t run_test(measure_session_conf config) {
   uint64_t n_failed = 0;
   increment inc = config.inc;
   DRAMAddr *fixed = config.fixed_addr;
+  DRAMAddr conflict_addr = *fixed;
   for(int i = 0; i < config.steps; i++) {
-    DRAMAddr conflict_addr = fixed->add(inc.bank_increment, inc.row_increment, inc.col_increment);
+    conflict_addr.add_inplace(inc.bank_increment, inc.row_increment, inc.col_increment);
     char* conflict_virt = (char *)conflict_addr.to_virt();
     void* fixed_virt = fixed->to_virt();
     if(conflict_virt == fixed_virt) {
