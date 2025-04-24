@@ -363,7 +363,8 @@ uint64_t run_test(measure_session_conf config) {
       if(first) {
         first_timing_type = current;
         first = false;
-        log("measured first timing for inconsistency measurement to be of type %s between %s and %s (%s(+%lu)) with a timing of %lu vs threshold %lu.",
+        log("[%s] measured first timing for inconsistency measurement to be of type %s between %s and %s (%s(+%lu)) with a timing of %lu vs threshold %lu.",
+            failure_type_str(config.scope),
             threshold_failure_t_str(current),
             fixed->to_string().c_str(),
             DRAMAddr(conflict_virt).to_string().c_str(),
@@ -383,6 +384,13 @@ uint64_t run_test(measure_session_conf config) {
                 threshold_failure_t_str(first_timing_type),
                 time);
         failed = true;
+      } else {
+        log_err("[OK][%s] mapping seems to be correct between %s and %s as the measurement is consistent. (%s with timing %lu)",
+                failure_type_str(config.scope),
+                fixed->to_string().c_str(),
+                conflict_addr.to_string().c_str(),
+                threshold_failure_t_str(current),
+                time);
       }
     } 
     else {
@@ -427,7 +435,7 @@ void test_col_threshold(DRAMAddr row_base, int n, char *alloc_start, int alloc_s
   
   config.scope = failure_type::OFFSET;
   config.inc = { 0, 0, 0, 1 };
-  config.steps = 0x0f; //this covers the lowest 4 bits. This is much less than normal column and row counts and thus should always be either row or col bits.
+  config.steps = 0xff; //this covers the lowest 8 bits. This is much less than normal column and row counts and thus should always be either row or col bits.
   //if accesses should be all fast if they are column bits or all slow if they are row bits.
   //if they are inconsistent, either the column bits are interleaved with row bits, or the lower bits are covered by bank bits.
   config.measure_fail_type = INCONSISTENT;
