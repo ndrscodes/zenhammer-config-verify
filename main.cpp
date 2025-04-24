@@ -451,7 +451,7 @@ void test_row_threshold(DRAMAddr bank_base, int n, char *alloc_start, int alloc_
   for(int i = 0; i < n; i++) {
     DRAMAddr row_conflict_test_addr = fixed;
     measure_session_conf c = config;
-    c.inc = { 0, (max_rows - fixed.actual_row()) / n, 0 };
+    c.inc = { 0, (max_rows - fixed.actual_row()) / n, 0, 0 };
     c.fixed_addr = &fixed;
     c.steps = n - i + 1;
     c.scope = failure_type::ROW;
@@ -461,7 +461,7 @@ void test_row_threshold(DRAMAddr bank_base, int n, char *alloc_start, int alloc_
       log_err("detected %lu failues while measuring row conflicts for %s.", failed, row_conflict_test_addr.to_string().c_str());
     }
 
-    c.inc = { 0, 1, 0 };
+    c.inc = { 0, 1, 0, 0 };
     c.steps = 1;
     c.scope = failure_type::CLOSE_ROW;
     c.measure_fail_type = threshold_failure_t::BELOW; //if access is fast, it means we are not hitting a new row or we are hitting a different bank.
@@ -471,7 +471,7 @@ void test_row_threshold(DRAMAddr bank_base, int n, char *alloc_start, int alloc_
       log_err("detected %lu failures while measuring close-row conflict test for %s.", failed, row_conflict_test_addr.to_string().c_str());
     }
 
-    c.inc = { 1, 0, 0 };
+    c.inc = { 1, 0, 0, 0 };
     c.steps = banks - 1;
     c.fixed_addr = &row_conflict_test_addr;
     c.measure_fail_type = threshold_failure_t::ABOVE; //if access is slow, we are hitting another row on the SAME bank.
@@ -502,7 +502,7 @@ void test_bank_threshold(int n, char *alloc_start, int alloc_size, uint64_t thre
     conf.measure_fail_type = threshold_failure_t::ABOVE; //if access is slow, we are hitting the same bank.
     conf.fixed_addr = &fixed;
     conf.steps = max;
-    conf.inc = { increment, 0, 0 };
+    conf.inc = { increment, 0, 0, 0 };
     conf.threshold_cycles = threshold_cycles;
     conf.alloc_size = alloc_size;
     conf.alloc_start = alloc_start;
