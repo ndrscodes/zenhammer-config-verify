@@ -329,6 +329,8 @@ void export_failures(const char* fname, std::vector<failure> *failures) {
   for(auto f : *failures) {
     fprintf(err_file, "%p;%p;%lu;%s;%s\n", f.addr1, f.addr2, f.timing, threshold_failure_t_str(f.type), failure_type_str(f.ftype));
   }
+
+  fflush(err_file);
 }
 
 uint64_t run_test(measure_session_conf config) {
