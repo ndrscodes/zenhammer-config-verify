@@ -390,7 +390,7 @@ uint32_t run_inconsistency_test(DRAMAddr base, int n, int step_size, char* alloc
   uint32_t n_failed = 0;
   std::vector<failure> failures;
   for(int i = 0; i < n; i += step_size) {
-    char *target_virt = base_virt += i;
+    char *target_virt = base_virt + i;
     if(target_virt > alloc_start + alloc_size) {
       log("stopping inconsistency test as we are wandering outside of the allocated area.");
       break;
