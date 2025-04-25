@@ -387,11 +387,14 @@ uint64_t run_test(measure_session_conf config) {
   return n_failed;
 }
 
-uint32_t run_inconsistency_test(DRAMAddr base, int n, int step_size, char* alloc_start, size_t alloc_size, uint64_t threshold_cycles) {
+uint32_t run_inconsistency_test(DRAMAddr base, int n, int step_modifier, int mod_after, char* alloc_start, size_t alloc_size, uint64_t threshold_cycles) {
   char *base_virt = (char *)base.to_virt();
   uint32_t n_failed = 0;
   std::vector<failure> failures;
+  int mod_cnt = 0;
+  int step_size = 1;
   for(int i = 0; i < n; i += step_size) {
+    mod_cnt++;
     char *target_virt = base_virt + i;
     if(target_virt > alloc_start + alloc_size) {
       log("stopping inconsistency test as we are wandering outside of the allocated area.");
@@ -429,6 +432,11 @@ uint32_t run_inconsistency_test(DRAMAddr base, int n, int step_size, char* alloc
     if(failed) {
       failures.push_back({ base_virt, target_virt, time, current, failure_type::OFFSET });
       n_failed++;
+    }
+
+    if(mod_cnt > mod_after) {
+      mod_cnt = 0;
+      step_size += step_modifier;
     }
   }
 
@@ -575,7 +583,7 @@ int main (int argc, char *argv[]) {
 
   log("running inconsistency test...");
   //check all bits up to bit 30 for inconsistent behaviour.
-  uint64_t inconsistent_addresses = run_inconsistency_test(DRAMAddr(alloc_start), (1 << 30) - 1, 1, (char *)alloc_start, N_PAGES * PAGE_SIZE, threshold);
+  uint64_t inconsistent_addresses = run_inconsistency_test(DRAMAddr(alloc_start), (1 << 30) - 1, 1, 0xffffff, (char *)alloc_start, N_PAGES * PAGE_SIZE, threshold);
   log("finished inconsistency test.");
   if(inconsistent_addresses) {
     log_err("found %lu inconsistent address pairs.", inconsistent_addresses);
