@@ -582,7 +582,7 @@ int main (int argc, char *argv[]) {
 
   log("running inconsistency test...");
   //check all bits up to bit 30 for inconsistent behaviour.
-  uint64_t inconsistent_addresses = run_inconsistency_test(DRAMAddr(alloc_start), 0xaffffff, 1, (char *)alloc_start, N_PAGES * PAGE_SIZE, threshold);
+  uint64_t inconsistent_addresses = run_inconsistency_test(DRAMAddr(alloc_start), 0xaabffff, 1, (char *)alloc_start, N_PAGES * PAGE_SIZE, threshold);
   log("finished inconsistency test.");
   if(inconsistent_addresses) {
     log_err("found %lu inconsistent address pairs.", inconsistent_addresses);
