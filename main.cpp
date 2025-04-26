@@ -391,8 +391,14 @@ uint32_t run_inconsistency_test(DRAMAddr base, size_t bits_considered, int step_
   char *base_virt = (char *)base.to_virt();
   uint32_t n_failed = 0;
   std::vector<failure> failures;
-
+  size_t bits_not_considered = ~bits_considered;
   for(int i = 0; i < bits_considered; i += step_size) {
+    if(bits_not_considered & i) {
+      //if this is true, a bit was 1 in an area where we are not considering effects, thus we can safely skip this check
+      //we do this to minimize runtime. It only makes sense when bits_considered has all lower bits set and additionally provides
+      //some flexibility in the upper bits.
+      continue;
+    }
     char *target_virt = base_virt + i;
     if(target_virt > alloc_start + alloc_size) {
       log("stopping inconsistency test as we are wandering outside of the allocated area.");
